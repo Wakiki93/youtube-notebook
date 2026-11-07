@@ -1,5 +1,11 @@
-__pycache__/
-*.pyc
-*.pyo
 .env
-config.json
+data/
+*.mp4
+*.zip
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/

@@ -1,0 +1,19 @@
+# Runs the daily clip-and-post loop.
+#   docker compose run --rm clipper check            # is everything wired up?
+#   docker compose run --rm clipper once <link>      # smallest slice: one link, one Reel
+#   docker compose up -d                             # start the daily loop
+#   docker compose logs -f clipper                   # watch it work
+services:
+  clipper:
+    build: .
+    image: auto-clip-poster:local
+    container_name: auto-clip-poster
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data            # queue.txt, state.json and AutoClip's renders live here
+    command: ["loop"]
+    # If Postiz runs on this same machine through vendor/postiz-docker-compose,
+    # set POSTIZ_API_URL=http://host.docker.internal:4007/api/public/v1 in .env.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

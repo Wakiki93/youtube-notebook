@@ -1,138 +1,113 @@
-# YouTube Research Toolkit
+# auto-clip-poster
 
-Search YouTube, extract full transcripts, and push content to Google NotebookLM for AI-powered research. Built as a Claude Code skill but works standalone too.
+Turns long YouTube videos into captioned Instagram Reels and posts one or more every day, on its own.
 
-## What It Does
+```
+queue.txt (your links)
+   │
+   ▼
+AutoClip ── finds the best moments, cuts 9:16 Reels with burned-in captions, writes the caption copy
+   │
+   ▼
+clip bank (data/state.json) ── Reels waiting for a slot
+   │
+   ▼
+Postiz ── schedules each Reel through Instagram's official API at your POST_TIMES
+```
 
-- **Search YouTube** - Find videos by query, saves results as organized markdown files
-- **Extract Transcripts** - Pull full transcripts from any YouTube video with captions
-- **Push to NotebookLM** - Send videos or transcript files to Google NotebookLM notebooks
+It joins two open-source projects without copying their code:
 
-All scripts fall back to yt-dlp when no YouTube API key is configured. Zero config needed to get started.
+| Piece | Project | How it's pulled in |
+|---|---|---|
+| Clipping | [AutoClip](https://github.com/zhouxiaoka/autoclip) (MIT) | Installed as its official package `autoclip-mcp`, pinned to 1.5.7.post1. We run its `autoclip produce` command. |
+| Posting | [Postiz](https://github.com/gitroomhq/postiz-app) (AGPL-3.0) | Runs as its own service (Postiz Cloud, or the official Docker setup in `vendor/postiz-docker-compose`). We only call its public API. |
 
-## Setup
+Keeping Postiz as a separate service matters: copying its AGPL source into this repo would put this whole repo under the AGPL.
 
-### Requirements
+## Words you'll see
 
-- Python 3.10+
-- yt-dlp (required)
-- youtube-transcript-api (recommended, for faster transcript extraction)
-- google-api-python-client (optional, for YouTube Data API v3)
+- **Queue**: `data/queue.txt`, the list of long videos to clip. You add links; the loop works through them in order.
+- **Clip bank**: Reels already made but not yet posted. The loop only clips a new video when the bank runs low.
+- **Slot**: one posting time on one day, from `POST_TIMES`. Each slot gets exactly one Reel.
+- **Cycle**: one run of the loop: top up the bank, then fill the next day's open slots. It runs daily at `RUN_AT`.
+- **Draft mode**: posts land in the Postiz calendar for you to approve. Nothing goes live until you switch `POST_MODE=schedule`.
+- **Dry run**: does everything except upload and post, and prints what it would have posted.
+
+## Your checklist (things only you can do)
+
+1. **Instagram**: make the new account a **Professional account** (Creator or Business). Instagram only allows posting through its official API for professional accounts.
+2. **Postiz**: pick one.
+   - **Postiz Cloud (fastest)**: sign up at postiz.com, click *Add Channel*, then *Instagram*, and log in. No Meta developer app needed.
+   - **Self-hosted (free, more work)**: you need a Meta developer app (`FACEBOOK_APP_ID`/`FACEBOOK_APP_SECRET` or the Instagram standalone pair) and a **public** web address for Postiz's uploads, because Instagram downloads each video from a public link. A laptop at `localhost` will not work for Instagram. Follow [Postiz's Instagram guide](https://docs.postiz.com/providers/instagram) and use Cloudflare R2 storage.
+3. **Postiz API key**: Postiz, then *Settings*, *Developers*, *Public API*. Paste it into `.env` as `POSTIZ_API_KEY`.
+4. **AI model key for AutoClip**: AutoClip needs one AI model to judge which moments are worth clipping. An OpenAI key with `gpt-4o-mini` is cheap and works. Gemini and DeepSeek work too.
+5. **Docker Desktop** installed and running.
+
+## Set up (about 15 minutes)
 
 ```bash
-pip install -r requirements.txt
+git clone --recurse-submodules <this repo's URL> auto-clip-poster
+cd auto-clip-poster
+cp .env.example .env          # then fill in POSTIZ_API_KEY and your AI key
+docker compose build
+docker compose run --rm clipper check
 ```
 
-### Configuration
+`check` posts nothing. It confirms AutoClip, ffmpeg and your Postiz Instagram channel are all reachable. Fix anything marked `[FAIL]` before going on. (AutoClip's own doctor lines print in Chinese: ✓ means OK, ✗ means a problem.)
 
-Copy the example config and customize:
+## Smallest slice first: one link, one Reel
 
 ```bash
-cp config.example.json config.json
+docker compose run --rm clipper once "https://www.youtube.com/watch?v=VIDEO_ID" --credit "@original_creator"
 ```
 
-```json
-{
-  "youtube_api_key": "",
-  "output_dir": "",
-  "default_language": "en",
-  "max_results": 10
-}
-```
+This clips one video (expect 10 to 30 minutes), sends its best Reel to the next open slot, and banks the rest. With `POST_MODE=draft` the Reel shows up in your Postiz calendar as a draft. Open it, watch it, and publish it by hand. That's your proof that every piece works.
 
-- `youtube_api_key` - Optional. See [references/api-setup.md](references/api-setup.md) for setup instructions. Scripts work without it via yt-dlp.
-- `output_dir` - Where to save markdown files. Defaults to `~/youtube-research-output/` if empty.
-- `default_language` - Language code for transcripts (default: `en`).
-- `max_results` - Default number of search results.
-
-## Usage
-
-### Search YouTube
+## Then turn on the daily loop
 
 ```bash
-python scripts/youtube_search.py "startup marketing strategy" --max-results 10
+docker compose run --rm clipper add "https://www.youtube.com/watch?v=..." --credit "@creator"   # repeat for each video
+docker compose up -d                                                                         # start the loop
+docker compose logs -f clipper                                                               # watch it
+docker compose run --rm clipper status                                                       # queue, bank, recent posts
 ```
 
-Output: Saves a markdown file with video titles, channels, view counts, durations, and descriptions.
+Or edit `data/queue.txt` directly: one link per line, optionally `link | credit`. Lines starting with `#` are ignored.
 
-```bash
-# JSON output for programmatic use
-python scripts/youtube_search.py "startup marketing" --json
-```
+Once you trust what the drafts look like, set `POST_MODE=schedule` in `.env` and restart with `docker compose up -d`. From then on Reels go live by themselves at `POST_TIMES`.
 
-### Extract Transcript
+**How the loop decides:** every day at `RUN_AT`, if fewer Reels are banked than there are slots in a day, it clips the next new link in the queue. Then it fills the next day's open slots, one Reel each. A link that fails to clip gets one retry the next day, then is skipped (see `status`). A Reel that fails to post goes back to the front of the bank.
 
-```bash
-python scripts/youtube_transcript.py "https://www.youtube.com/watch?v=VIDEO_ID"
+## Commands
 
-# With timestamps
-python scripts/youtube_transcript.py "VIDEO_ID" --timestamps
+| Command | What it does |
+|---|---|
+| `acp check` | Confirms everything is wired up. Posts nothing. |
+| `acp once <link> [--credit X] [--count N]` | Clips one link and sends its best N Reels now. |
+| `acp add <link> [--credit X]` | Adds a link to the queue. |
+| `acp cycle` | Runs one daily cycle right now. |
+| `acp loop` | Runs a cycle now, then every day at `RUN_AT`. This is what `docker compose up` runs. |
+| `acp status` | Shows the queue, the bank, failures and recent posts. |
 
-# Different language
-python scripts/youtube_transcript.py "VIDEO_ID" --lang es
-```
+Inside Docker, prefix each with `docker compose run --rm clipper`, as in `docker compose run --rm clipper status`.
 
-Output: Saves a markdown file with full transcript, video metadata, and word count.
+## Settings (`.env`)
 
-### Push to NotebookLM
+All settings are explained in `.env.example`. The ones you'll touch most: `POST_MODE`, `POST_TIMES`, `TIMEZONE`, `CLIPS_PER_VIDEO`, `CAPTION_FOOTER`, `AUTOCLIP_INSTRUCTION` (plain-English steer, such as "favor practical advice"), `DRY_RUN`.
 
-Requires the [notebooklm-py](https://github.com/teng-lin/notebooklm-py) CLI:
+## Read this before you post other people's videos
 
-```bash
-pip install notebooklm-py
-notebooklm login  # One-time browser auth
-```
+- **Reach:** since April 30, 2026, Instagram keeps accounts that mainly repost other people's content out of recommendations (Explore, Reels feed). Watermarks and speed changes don't count as edits. Adding your own perspective does: commentary, a voiceover, a reaction. AutoClip's captions and reframing help, but on their own they may not be enough.
+- **Copyright:** clipping someone else's video without permission can draw takedowns and strikes. Clip your own videos, creators who allow it, or content you have rights to, and credit the source with `--credit`.
+- **Limits:** Instagram's API allows 100 posts per 24 hours per account. Postiz limits its create-post API to 90 calls an hour on self-hosted setups by default (100 on Postiz Cloud). Daily posting is far under both.
 
-```bash
-# Add a YouTube video directly
-python scripts/youtube_to_notebook.py "https://youtube.com/watch?v=VIDEO_ID" --notebook "My Research"
+## Gotchas
 
-# Add a local transcript file
-python scripts/youtube_to_notebook.py "./transcript-file.md" --notebook "My Research"
-```
+- **YouTube may block server downloads** with "sign in to confirm you're not a bot". Running at home usually avoids it. Otherwise, download the video yourself and add the file path (`/data/videos/talk.mp4`) to the queue instead of the link.
+- **Videos without captions** need local transcription (Whisper), which is in the default image. Build with `--build-arg WHISPER=0` for a smaller image if your sources always have captions.
+- **Self-hosted Postiz on the same machine:** set `POSTIZ_API_URL=http://host.docker.internal:4007/api/public/v1`.
+- **AutoClip telemetry is switched off**: the first run writes `privacy.json` with analytics and crash reports off.
 
-## Using as a Claude Code Skill
+## For Claude Code
 
-To install as a Claude Code skill, copy this folder to `~/.claude/skills/youtube-research/`. The `SKILL.md` file tells Claude Code how to use the scripts via natural language.
-
-Triggers:
-- `/youtube-research search "query"`
-- `/youtube-research transcript <url>`
-- `/youtube-research notebook <url> --notebook "name"`
-- Or just say "search YouTube for..." and Claude Code picks it up.
-
-## Output Format
-
-All output files are markdown with YAML frontmatter:
-
-**Search results:**
-```markdown
----
-query: "startup marketing"
-date: 2026-03-11
-result_count: 10
-type: youtube-search
----
-```
-
-**Transcripts:**
-```markdown
----
-title: "Video Title"
-channel: "Channel Name"
-video_id: abc123
-url: https://youtube.com/watch?v=abc123
-word_count: 5000
-type: youtube-transcript
----
-```
-
-## How It Works
-
-1. **Search** tries YouTube Data API v3 first (if API key configured), falls back to yt-dlp
-2. **Transcripts** try youtube-transcript-api first, fall back to yt-dlp subtitle extraction (json3/vtt)
-3. **NotebookLM** integration uses the notebooklm-py CLI to push sources
-
-## License
-
-MIT
+See `CLAUDE.md`. Tests: `pip install -e ".[dev]" && pytest -q` (no keys or network needed; AutoClip and Postiz are mocked).

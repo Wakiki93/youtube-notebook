@@ -1,0 +1,3 @@
+[submodule "vendor/postiz-docker-compose"]
+	path = vendor/postiz-docker-compose
+	url = https://github.com/gitroomhq/postiz-docker-compose
