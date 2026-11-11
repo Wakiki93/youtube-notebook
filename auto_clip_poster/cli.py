@@ -108,6 +108,37 @@ def cmd_check(args) -> int:
     return 0 if ok else 1
 
 
+def _scout_settings():
+    from .scout.config import ScoutSettings
+    try:
+        return ScoutSettings.from_env()
+    except ConfigError as error:
+        print(f"Setting problem: {error}", file=sys.stderr)
+        raise SystemExit(2)
+
+
+def cmd_scout(args) -> int:
+    """Find and rank clips on Twitch and YouTube. Never posts."""
+    from .scout.runner import Scout, check_text, report_text
+    s = _scout_settings()
+    if args.action == "check":
+        ok, text = check_text(s)
+        print(text)
+        return 0 if ok else 1
+    if args.action == "report":
+        print(report_text(s, args.top))
+        return 0
+    scout = Scout(s)
+    if args.action == "loop":
+        scout.loop()
+        return 0
+    report = scout.run_once(download=True if args.download else None)
+    print(report.summary())
+    print()
+    print(report_text(s, args.top))
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="acp", description="Clip long videos into Reels and post them to Instagram via Postiz.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -131,6 +162,14 @@ def main(argv=None) -> int:
     p = sub.add_parser("check", help="check AutoClip, ffmpeg and Postiz are set up (posts nothing)")
     p.add_argument("--skip-doctor", action="store_true", help="skip AutoClip's model and Whisper check")
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("scout", help="find and rank the best new GTA clips on Twitch and YouTube (never posts)")
+    p.add_argument("action", nargs="?", default="run", choices=["run", "loop", "report", "check"],
+                   help="run: one pass now (default); loop: every SCOUT_INTERVAL_MINUTES; "
+                        "report: show the ranked list; check: test keys and tools")
+    p.add_argument("--download", action="store_true", help="also download the top clips this pass")
+    p.add_argument("--top", type=int, default=15, help="how many to list in the report")
+    p.set_defaults(func=cmd_scout)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,

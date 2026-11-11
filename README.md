@@ -78,6 +78,44 @@ Once you trust what the drafts look like, set `POST_MODE=schedule` in `.env` and
 
 **How the loop decides:** every day at `RUN_AT`, if fewer Reels are banked than there are slots in a day, it clips the next new link in the queue. Then it fills the next day's open slots, one Reel each. A link that fails to clip gets one retry the next day, then is skipped (see `status`). A Reel that fails to post goes back to the front of the bank.
 
+## The GTA scout (finds clips, never posts)
+
+The scout runs on its own, every 15 minutes, and keeps a ranked list of the best new GTA clips. It is step 1 of the GTA 6 plan: it only finds, ranks and (if you turn it on) downloads. It never uploads or posts anything, and it doesn't need a graphics card.
+
+Where it looks:
+- **Twitch top clips** for the game's category, from Twitch's official API. Viewers already cut these, so the views tell us what's funny or wild. Needs a free Twitch developer app.
+- **Your YouTube watchlist** in `data/creators.txt`: each channel's new uploads, from YouTube's free feed (no API key, no quota). For a YouTube video it never saves the whole thing; it reads the "Most replayed" graph and saves only the best 45 seconds around each peak.
+
+What it skips, and why (`acp scout report` shows the count for each):
+- Titles with leak or spoiler words (leak, datamined, spoiler, ending and more). Rockstar takes these down.
+- Anything made before GTA 6 unlocks (11 PM Central, Nov 18). Pre-release footage gets taken down.
+- YouTube titles that aren't about the game, clips older than a day, clips under 200 views, non-English Twitch clips.
+- Anyone in `data/blocklist.txt`. Add every creator who files a claim or asks you to stop.
+- The same moment clipped twice on Twitch: only the most-viewed copy is kept.
+
+How it ranks: `20 x log10(1 + views) + 20 x log10(1 + views per hour)`. Views say people liked it; views per hour say it's hot right now. Scores only compare within one source, so downloads take turns between Twitch and YouTube.
+
+### Rehearse on GTA V now
+
+```bash
+# in .env: SCOUT_PROFILE=gta5, plus TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET
+docker compose build
+docker compose run --rm scout scout check            # are Twitch and yt-dlp working?
+docker compose run --rm scout scout run              # one pass: find and rank, no downloads
+docker compose run --rm scout scout run --download   # same, and download the top 5
+docker compose run --rm scout scout report           # the ranked list and what got skipped
+```
+
+Downloads land in `data/scout/clips/`, each with a `.json` file next to it saying who made it and where it came from (for credit later). They're deleted after 14 days.
+
+### For launch
+
+Set `SCOUT_PROFILE=gta6` and run `docker compose up -d scout`. It waits quietly until the game unlocks, then starts filling the list. Turn on `SCOUT_DOWNLOAD=true` once you've watched a few passes and like what it picks.
+
+**Twitch keys (5 minutes, free):** Twitch requires two-factor sign-in on your Twitch account first (Settings, Security and Privacy). Then sign in at dev.twitch.tv/console, open *Applications*, choose *Register Your Application*, give it a unique name, add the OAuth Redirect URL `http://localhost:3000` (the scout never uses it, but the form needs one), pick a category such as *Application Integration*, and click *Create*. Open *Manage*, copy the Client ID, click *New Secret* and copy that too. Paste both into `.env`. Treat the secret like a password.
+
+**The starter watchlist** in `data/creators.txt` is 8 big GTA channels so the scout has something to watch on day one. Being on that list is not permission to repost them. Edit it to the creators you want, and favor ones who allow clipping.
+
 ## Commands
 
 | Command | What it does |

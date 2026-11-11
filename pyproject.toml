@@ -19,13 +19,16 @@ dependencies = [
 clip = ["autoclip-mcp==1.5.7.post1"]
 # Local transcription for videos without captions (large download).
 whisper = ["faster-whisper>=1.0"]
+# The GTA scout's downloader. Left unpinned on purpose: YouTube and Twitch change often
+# and only the newest yt-dlp keeps up.
+scout = ["yt-dlp>=2026.10.26"]
 dev = ["pytest>=8"]
 
 [project.scripts]
 acp = "auto_clip_poster.cli:main"
 
 [tool.setuptools]
-packages = ["auto_clip_poster"]
+packages = ["auto_clip_poster", "auto_clip_poster.scout"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

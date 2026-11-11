@@ -3,7 +3,19 @@
 #   docker compose run --rm clipper once <link>      # smallest slice: one link, one Reel
 #   docker compose up -d                             # start the daily loop
 #   docker compose logs -f clipper                   # watch it work
+#   docker compose up -d scout                       # GTA scout only: finds and ranks clips, never posts
+#   docker compose run --rm scout scout report       # see what it ranked best
 services:
+  scout:
+    image: auto-clip-poster:local
+    build: .
+    container_name: gta-scout
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data            # scout.db, creators.txt, blocklist.txt and downloaded clips
+    command: ["scout", "loop"]
+
   clipper:
     build: .
     image: auto-clip-poster:local

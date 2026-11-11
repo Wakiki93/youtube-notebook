@@ -12,7 +12,7 @@ COPY auto_clip_poster ./auto_clip_poster
 
 # WHISPER=0 skips local transcription (about 1 GB smaller); videos without captions then fail to clip.
 ARG WHISPER=1
-RUN pip install --no-cache-dir ".[clip]" \
+RUN pip install --no-cache-dir ".[clip,scout]" \
  && if [ "$WHISPER" = "1" ]; then pip install --no-cache-dir "faster-whisper>=1.0"; fi
 
 ENV ACP_DATA_DIR=/data \
